@@ -103,10 +103,12 @@ else
     echo "   (no [RDP.AUDIO_PLAYBACK] lines — no audio-enabled client yet, or audio is disabled)"
 fi
 if grep -q 'Disabling audio output redirection' "$LOGDIR/grd.log" 2>/dev/null; then
-    echo "   !! found 'Disabling audio output redirection' ->"
+    echo "   note: grd logged 'Disabling audio output redirection' — this is cosmetic:"
+    echo "         it is printed *before* the call this shim intercepts, so it is"
+    echo "         harmless as long as the shim is LOADED (see above):"
     grep 'Disabling audio output redirection' "$LOGDIR/grd.log" | tail -2 | sed 's/^/      /'
 else
-    echo "   (no 'Disabling audio output redirection' — good)"
+    echo "   (no 'Disabling audio output redirection' line)"
 fi
 rm -rf "$LOGDIR" 2>/dev/null || true
 

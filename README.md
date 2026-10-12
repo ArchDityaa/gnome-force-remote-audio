@@ -152,7 +152,7 @@ pw-top        # look for gnome-remote-desktop-daemon with a S16LE/audio row
 | --- | --- |
 | Still no audio after `./install.sh` | Run `./diagnose.sh`; make sure the daemon shows the shim as `LOADED`. Restart the service: `systemctl --user restart gnome-remote-desktop.service`. |
 | Works for Desktop Sharing, not Remote Login | Remote Login uses the **system** service — install with `./install.sh --system`. |
-| Log still shows *"Disabling audio output redirection"* | The shim is not in the daemon. Check the drop-in path and `LD_PRELOAD` (see *How it works*), then restart the service. |
+| Log still shows *"Disabling audio output redirection"* | **Expected — not an error.** grd prints that `g_warning` *before* it calls the function this shim intercepts, so the line appears even when the fix works. Judge success by `./diagnose.sh` (shim `LOADED`) and by `[RDP.AUDIO_PLAYBACK]` lines instead. |
 | Sound settings show *"Dummy Output"*, nothing plays | The machine has no sound card (common in VMs). Re-run with `--with-virtual-soundcard`. |
 | Audio works but stutters/glitches | grd disabled it for a reason; some mobile clients handle graphics+audio poorly. Try another client, or use NoMachine/RustDesk. |
 | Installer warns it defaults the id to 714 | Install the FreeRDP headers (`sudo apt install freerdp3-dev`) so it can auto-detect, then re-run. |
@@ -176,6 +176,11 @@ setting right after it tries to clear it, audio redirection stays on.
 No FreeRDP/WinPR development headers are needed at runtime: WinPR's `BOOL` is a
 plain `int`, so the shim's prototypes are ABI-compatible with the real
 functions.
+
+Note: grd emits its `Disabling audio output redirection` warning *before* it
+calls `freerdp_settings_set_bool()`, so that line still shows up in the journal
+even when the shim is working. The shim stops the setting from actually being
+cleared — it does not (and cannot) silence the warning.
 
 ## Optional: virtual sound card
 
