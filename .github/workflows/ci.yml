@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: ShellCheck scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck
+        run: shellcheck install.sh uninstall.sh diagnose.sh
+
+  build-shim:
+    name: Build the LD_PRELOAD shim
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile
+        run: |
+          gcc -shared -fPIC -O2 -Wall \
+              -o /tmp/libgrd-audio-fix.so \
+              src/grd-audio-fix.c \
+              -DAUDIO_PLAYBACK_ID=714 \
+              -ldl
+          echo "built:" && file /tmp/libgrd-audio-fix.so

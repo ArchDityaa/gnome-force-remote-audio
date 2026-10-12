@@ -1,0 +1,11 @@
+# build artefacts
+build/
+*.so
+
+# editor / OS cruft
+*.swp
+*~
+.DS_Store
+
+# logs
+*.log
