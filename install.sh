@@ -10,20 +10,30 @@
 # installed under ~/.local/lib and injected into the per-user
 # gnome-remote-desktop.service ("Desktop Sharing").
 #
+# The shim is built from source with gcc. If gcc is missing — or if you pass
+# --prebuilt — a prebuilt x86_64 / FreeRDP-3 library is downloaded from the
+# latest GitHub release instead.
+#
 # Optional flags:
 #   --system                   also install for the system-wide service
 #                              ("Remote Login"/headless) — requires sudo.
 #   --with-virtual-soundcard   load the snd-dummy virtual sound card, useful on
 #                              VMs with no audio device — requires sudo.
+#   --prebuilt                 download the prebuilt shim instead of building it
+#                              from source (no gcc needed).
 #
-# Usage:  ./install.sh [--system] [--with-virtual-soundcard]
+# Usage:  ./install.sh [--system] [--with-virtual-soundcard] [--prebuilt]
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+REPO="ArchDityaa/gnome-force-remote-audio"
+RELEASE_URL="https://github.com/$REPO/releases/latest/download"
+
 DO_SYSTEM=0
 DO_SOUNDCARD=0
+DO_PREBUILT=0
 SYS_LIBDIR="/opt/grd-audio-fix"
 
 say()  { printf '    %s\n' "$*"; }
@@ -39,6 +49,17 @@ as_root() {
     fi
 }
 
+# Download a URL to stdout, using whichever fetcher is available.
+download() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$1"
+    else
+        die "need curl or wget to download the prebuilt shim"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # arguments
 # ---------------------------------------------------------------------------
@@ -46,6 +67,7 @@ for arg in "$@"; do
     case "$arg" in
         --system)                 DO_SYSTEM=1 ;;
         --with-virtual-soundcard) DO_SOUNDCARD=1 ;;
+        --prebuilt)               DO_PREBUILT=1 ;;
         -h|--help)
             grep '^#' "$0" | sed 's/^# \{0,1\}//'
             exit 0
@@ -55,17 +77,9 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
-# sanity checks
+# environment
 # ---------------------------------------------------------------------------
 hdr "Checking environment"
-
-if ! command -v gcc >/dev/null 2>&1; then
-    die "gcc is required to build the audio shim but was not found.
-    Debian/Ubuntu : sudo apt install gcc
-    Fedora        : sudo dnf install gcc
-    Arch          : sudo pacman -S gcc"
-fi
-say "gcc            : $(command -v gcc)"
 
 if ! command -v systemctl >/dev/null 2>&1; then
     warn "systemctl not found; this tool expects a systemd --user session."
@@ -86,45 +100,90 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# find the numeric id of FreeRDP_AudioPlayback
+# decide: build from source, or use the prebuilt library
 # ---------------------------------------------------------------------------
-hdr "Detecting FreeRDP_AudioPlayback id"
-
-AUDIO_PLAYBACK_ID="${AUDIO_PLAYBACK_ID:-}"
-if [ -z "$AUDIO_PLAYBACK_ID" ]; then
-    for f in /usr/include/freerdp*/freerdp/settings_keys.h \
-             /usr/include/freerdp/freerdp/settings_keys.h \
-             /usr/include/freerdp*/freerdp/settings.h; do
-        [ -r "$f" ] || continue
-        id="$(sed -n 's/.*FreeRDP_AudioPlayback[^0-9]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)"
-        if [ -n "$id" ]; then
-            AUDIO_PLAYBACK_ID="$id"
-            say "found in       : $f"
-            break
-        fi
-    done
+USE_PREBUILT="$DO_PREBUILT"
+if [ "$USE_PREBUILT" -eq 0 ] && ! command -v gcc >/dev/null 2>&1; then
+    warn "gcc not found — falling back to the prebuilt shim."
+    USE_PREBUILT=1
 fi
-if [ -z "$AUDIO_PLAYBACK_ID" ]; then
-    AUDIO_PLAYBACK_ID=714
-    warn "FreeRDP headers not found; defaulting FreeRDP_AudioPlayback id to 714 (FreeRDP 3.x)."
-    warn "If audio still does not work, install the FreeRDP dev headers"
-    warn "(e.g. sudo apt install freerdp3-dev) and re-run this installer."
-fi
-say "AUDIO_PLAYBACK_ID = $AUDIO_PLAYBACK_ID"
 
-# ---------------------------------------------------------------------------
-# build the shim
-# ---------------------------------------------------------------------------
-hdr "Building audio shim"
 BUILD_DIR="$SCRIPT_DIR/build"
 mkdir -p "$BUILD_DIR"
-# shellcheck disable=SC2086
-gcc -shared -fPIC -O2 -Wall \
-    -o "$BUILD_DIR/libgrd-audio-fix.so" \
-    "$SCRIPT_DIR/src/grd-audio-fix.c" \
-    -DAUDIO_PLAYBACK_ID="$AUDIO_PLAYBACK_ID" \
-    -ldl
-say "built $BUILD_DIR/libgrd-audio-fix.so"
+SHIM_SO="$BUILD_DIR/libgrd-audio-fix.so"
+
+if [ "$USE_PREBUILT" -eq 1 ]; then
+    hdr "Using prebuilt audio shim"
+
+    ARCH="$(uname -m)"
+    if [ "$ARCH" != "x86_64" ]; then
+        die "the prebuilt shim is x86_64 only, but this machine is $ARCH.
+    Install gcc and build from source instead:
+      Debian/Ubuntu : sudo apt install gcc
+      Fedora        : sudo dnf install gcc
+      Arch          : sudo pacman -S gcc
+    then re-run:  ./install.sh"
+    fi
+
+    say "source         : $RELEASE_URL/libgrd-audio-fix.so"
+    if ! download "$RELEASE_URL/libgrd-audio-fix.so" > "$SHIM_SO"; then
+        die "failed to download the prebuilt shim.
+    Check your network, or build from source (install gcc) and re-run ./install.sh."
+    fi
+
+    if download "$RELEASE_URL/libgrd-audio-fix.so.sha256" \
+           > "$BUILD_DIR/libgrd-audio-fix.so.sha256" 2>/dev/null; then
+        if ( cd "$BUILD_DIR" && sha256sum -c libgrd-audio-fix.so.sha256 >/dev/null 2>&1 ); then
+            say "checksum       : OK"
+        else
+            rm -f "$SHIM_SO"
+            die "checksum verification FAILED (corrupt or tampered download)."
+        fi
+    else
+        warn "could not download the checksum file; skipping verification."
+    fi
+    say "downloaded     : $SHIM_SO"
+
+else
+    # -----------------------------------------------------------------------
+    # find the numeric id of FreeRDP_AudioPlayback
+    # -----------------------------------------------------------------------
+    hdr "Detecting FreeRDP_AudioPlayback id"
+
+    AUDIO_PLAYBACK_ID="${AUDIO_PLAYBACK_ID:-}"
+    if [ -z "$AUDIO_PLAYBACK_ID" ]; then
+        for f in /usr/include/freerdp*/freerdp/settings_keys.h \
+                 /usr/include/freerdp/freerdp/settings_keys.h \
+                 /usr/include/freerdp*/freerdp/settings.h; do
+            [ -r "$f" ] || continue
+            id="$(sed -n 's/.*FreeRDP_AudioPlayback[^0-9]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)"
+            if [ -n "$id" ]; then
+                AUDIO_PLAYBACK_ID="$id"
+                say "found in       : $f"
+                break
+            fi
+        done
+    fi
+    if [ -z "$AUDIO_PLAYBACK_ID" ]; then
+        AUDIO_PLAYBACK_ID=714
+        warn "FreeRDP headers not found; defaulting FreeRDP_AudioPlayback id to 714 (FreeRDP 3.x)."
+        warn "If audio still does not work, install the FreeRDP dev headers"
+        warn "(e.g. sudo apt install freerdp3-dev) and re-run this installer."
+    fi
+    say "AUDIO_PLAYBACK_ID = $AUDIO_PLAYBACK_ID"
+
+    # -----------------------------------------------------------------------
+    # build the shim
+    # -----------------------------------------------------------------------
+    hdr "Building audio shim from source"
+    say "compiler       : $(command -v gcc)"
+    gcc -shared -fPIC -O2 -Wall \
+        -o "$SHIM_SO" \
+        "$SCRIPT_DIR/src/grd-audio-fix.c" \
+        -DAUDIO_PLAYBACK_ID="$AUDIO_PLAYBACK_ID" \
+        -ldl
+    say "built          : $SHIM_SO"
+fi
 
 # ---------------------------------------------------------------------------
 # install (user scoped, default)
@@ -132,7 +191,7 @@ say "built $BUILD_DIR/libgrd-audio-fix.so"
 hdr "Installing user-scoped shim (Desktop Sharing)"
 LIBDIR="$HOME/.local/lib/grd-audio-fix"
 mkdir -p "$LIBDIR"
-cp -f "$BUILD_DIR/libgrd-audio-fix.so" "$LIBDIR/libgrd-audio-fix.so"
+cp -f "$SHIM_SO" "$LIBDIR/libgrd-audio-fix.so"
 chmod 755 "$LIBDIR/libgrd-audio-fix.so"
 say "library        : $LIBDIR/libgrd-audio-fix.so"
 
@@ -159,8 +218,7 @@ fi
 if [ "$DO_SYSTEM" -eq 1 ]; then
     hdr "Installing system-scoped shim (Remote Login/headless) — needs sudo"
     as_root install -d -m 755 "$SYS_LIBDIR"
-    as_root install -m 755 "$BUILD_DIR/libgrd-audio-fix.so" \
-        "$SYS_LIBDIR/libgrd-audio-fix.so"
+    as_root install -m 755 "$SHIM_SO" "$SYS_LIBDIR/libgrd-audio-fix.so"
     say "library        : $SYS_LIBDIR/libgrd-audio-fix.so"
 
     SYS_DROPIN_DIR="/etc/systemd/system/gnome-remote-desktop.service.d"

@@ -77,7 +77,9 @@ to `FALSE`. A client that genuinely does not support audio leaves the key
 ## Requirements
 
 - `gnome-remote-desktop` **45+** (tested on 46.3).
-- `gcc` (to build the shim) and a `systemd --user` session.
+- A `systemd --user` session.
+- Either `gcc` to build the shim, or the `--prebuilt` flag (downloads a prebuilt
+  x86_64 binary — see below).
   - Debian/Ubuntu: `sudo apt install gcc`
   - Fedora: `sudo dnf install gcc`
   - Arch: `sudo pacman -S gcc`
@@ -97,6 +99,28 @@ cd gnome-force-remote-audio
 ```
 
 Then reconnect from your phone and play something on the GNOME machine.
+
+### Prebuilt (no `gcc` needed)
+
+If you cannot (or do not want to) install `gcc`, pass `--prebuilt` to download
+the library from the [latest release](https://github.com/ArchDityaa/gnome-force-remote-audio/releases/latest)
+instead of compiling it:
+
+```bash
+git clone https://github.com/ArchDityaa/gnome-force-remote-audio.git
+cd gnome-force-remote-audio
+./install.sh --prebuilt
+```
+
+`install.sh` falls back to the prebuilt library automatically when `gcc` is not
+found, so simply running `./install.sh` also works.
+
+> The prebuilt shim is **x86_64** and compiled for
+> `FreeRDP_AudioPlayback = 714` (**FreeRDP 3.x**, used by every distro with
+> gnome-remote-desktop 45+). On a different architecture — or a FreeRDP 2.x
+> system — install `gcc` and build from source instead; the installer refuses to
+> use the prebuilt library on non-`x86_64` machines. The download is verified
+> against a published `SHA-256` checksum.
 
 If you use **Remote Login / headless** sessions (you connect before logging in
 locally), also install the system-wide hook:
@@ -163,7 +187,9 @@ pw-top        # look for gnome-remote-desktop-daemon with a S16LE/audio row
 
 1. Detects the numeric id of `FreeRDP_AudioPlayback` from the installed FreeRDP
    headers (falls back to `714` for FreeRDP 3.x).
-2. Compiles `src/grd-audio-fix.c` into `libgrd-audio-fix.so`.
+2. Compiles `src/grd-audio-fix.c` into `libgrd-audio-fix.so` — or, with
+   `--prebuilt` (or when `gcc` is missing), downloads a prebuilt library and
+   verifies its `SHA-256` checksum.
 3. Installs the library and a systemd drop-in that sets
    `LD_PRELOAD=/path/to/libgrd-audio-fix.so` for `gnome-remote-desktop.service`
    (user scope by default, system scope with `--system`).
@@ -239,6 +265,7 @@ cd gnome-force-remote-audio
 ./install.sh
 # untuk Remote Login/headless:        ./install.sh --system
 # untuk VM tanpa sound card:          ./install.sh --with-virtual-soundcard
+# tanpa gcc (unduh binary siap pakai):  ./install.sh --prebuilt
 ```
 
 **Verifikasi:** `./diagnose.sh` — hasil sehat menampilkan shim `LOADED` dan ada
