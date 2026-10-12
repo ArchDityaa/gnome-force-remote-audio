@@ -9,7 +9,7 @@ jobs:
     name: ShellCheck scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install shellcheck
         run: |
           sudo apt-get update
@@ -21,7 +21,7 @@ jobs:
     name: Build the LD_PRELOAD shim
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Compile
         run: |
           gcc -shared -fPIC -O2 -Wall \
